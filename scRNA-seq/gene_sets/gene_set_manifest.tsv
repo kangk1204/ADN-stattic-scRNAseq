@@ -1,0 +1,21 @@
+set_id	sheet	column	header	n_genes	species	source	version	workbook_sha256
+group1	Figure 2D Gene List	1	group 1	664	Mus musculus	Bulk-defined Group 1; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+group2	Figure 2D Gene List	2	group 2	690	Mus musculus	Bulk-defined Group 2; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+group3	Figure 2D Gene List	3	group 3	305	Mus musculus	Bulk-defined Group 3; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+group4	Figure 2D Gene List	4	group 4	742	Mus musculus	Bulk-defined Group 4; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+GOBP_FERROPTOSIS	Figure 2E, 3F Gene List	1	GOBP_FERROPTOSIS	32	Mus musculus	MSigDB; supplied Table S1 membership	v2026.1.Mm (reported)	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+GOBP_LIPID_OXIDATION	Figure 2E, 3F Gene List	2	GOBP_LIPID_OXIDATION	130	Mus musculus	MSigDB; supplied Table S1 membership	v2026.1.Mm (reported)	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+WP_GLUTATHIONE_METABOLISM	Figure 2E, 3F Gene List	3	WP_GLUTATHIONE_METABOLISM	22	Mus musculus	MSigDB; supplied Table S1 membership	v2026.1.Mm (reported)	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+LipidOxidation	Figure 3E Gene List	1	lipid oxidation (n = 46)	46	Mus musculus	Manuscript module; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+EpigeneticRegulation	Figure 3E Gene List	2	epigenetic regulation (n = 48)	48	Mus musculus	Manuscript module; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+InflammatoryResponse	Figure 3E Gene List	3	inflammatory response (n = 143)	143	Mus musculus	Manuscript module; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+ECMOrganization	Figure 3E Gene List	4	ECM organization (n = 76)	76	Mus musculus	Manuscript module; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+PST_cluster1	Figure 4B Gene List	1	Cluster 1	35	Mus musculus	Condition-dependent PST gene cluster; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+PST_cluster2	Figure 4B Gene List	2	Cluster 2	198	Mus musculus	Condition-dependent PST gene cluster; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+PST_cluster3	Figure 4B Gene List	3	Cluster 3	16	Mus musculus	Condition-dependent PST gene cluster; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+PST_cluster4	Figure 4B Gene List	4	Cluster 4	16	Mus musculus	Condition-dependent PST gene cluster; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+MacrophageInflammatory	Figure 5D Gene List	1	inflammatory response (n = 143)	143	Mus musculus	Manuscript module; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+MacrophageECM	Figure 5D Gene List	2	ECM organization (n = 76)	76	Mus musculus	Manuscript module; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+IL6_JAK_STAT3	Figure 5D Gene List	3	IL-6/JAK/STAT3 signaling (n = 85)	85	Mus musculus	Supplied mouse module; Table S1; original MSigDB release/orthology not documented	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+GEC0_genes	Figure S8C Gene List	1	GEC0-specific genes	55	Mus musculus	GEC0 marker list; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af
+GEC1_genes	Figure S8C Gene List	2	GEC1-specific genes	831	Mus musculus	GEC1 marker list; Table S1	261011	a24be78f62b9819a1303b46f03f437487297303ddfa9607afff30cc8633e52af

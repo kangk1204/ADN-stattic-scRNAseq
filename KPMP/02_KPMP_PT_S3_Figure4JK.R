@@ -1,0 +1,514 @@
+# ============================================================================
+# 02_KPMP_PT_S3_Figure4JK
+# Human PT-S3 / Figure 4J-K
+# Public, sequential workflow — 2026-10-12
+# This R script contains executable R code; use Rscript or source().
+# Start a fresh R session. Edit Configuration; do not edit Helpers routinely.
+# Input data and software dependencies must be obtained separately; see README.md.
+# ============================================================================
+
+# 1. Configuration -------------------------------------------------------------
+config <- list(
+    atlas_rds = file.path(Sys.getenv("KIDNEY_RESULTS_DIR", "results"), "01_Atlas", "KPMP_filtered_atlas.rds"),
+    output_dir = Sys.getenv("KIDNEY_RESULTS_DIR", "results"),
+    donor_id_column = "donor_id",           # Same consortium donor identifier as script 01
+    subclasses = c("Proximal Tubule Epithelial Cell Segment 3"),
+    npcs = 30L,
+    resolution = 0.1,                 # Original source setting
+    seed = 42L,
+    cluster_seed = 0L,
+    dunn_adjust = "bonferroni",        # Explicit; three pairwise disease comparisons per gene
+    expected_seurat_version = "5.3.0",
+    allow_version_mismatch = FALSE
+)
+restart_failed_stage <- FALSE
+
+# 2. Libraries and helpers -----------------------------------------------------
+# Packages are checked below; no automatic installation, download, or setwd().
+locate_project <- function ()
+{
+    for (i in rev(seq_along(sys.frames()))) {
+        f <- sys.frame(i)$ofile
+        if (!is.null(f))
+            return(dirname(normalizePath(f)))
+    }
+    arg <- grep("^--file=", commandArgs(), value = TRUE)
+    if (length(arg)) {
+        f <- sub("^--file=", "", arg[1])
+        if (!file.exists(f))
+            f <- gsub("~+~", " ", f, fixed = TRUE)
+        return(dirname(normalizePath(f, mustWork = TRUE)))
+    }
+    normalizePath(getwd())
+}
+
+need <- function (packages)
+{
+    missing <- packages[!vapply(packages, requireNamespace, logical(1), quietly = TRUE)]
+    if (length(missing))
+        stop("Missing packages: ", paste(missing, collapse = ", "), ". See README.md.", call. = FALSE)
+}
+
+path_at <- function (root, x)
+{
+    if (is.null(x))
+        return(NULL)
+    if (grepl("^(~|/|[A-Za-z]:[/\\\\])", x))
+        path.expand(x)
+    else file.path(root, x)
+}
+
+read_tsv <- function (file)
+{
+    if (!file.exists(file))
+        stop("Missing input: ", file, call. = FALSE)
+    read.delim(file, check.names = FALSE, stringsAsFactors = FALSE, quote = "", comment.char = "")
+}
+
+write_tsv <- function (x, path)
+{
+    dir.create(dirname(path), recursive = TRUE, showWarnings = FALSE)
+    write.table(x, path, sep = "\t", quote = FALSE, row.names = FALSE, na = "NA")
+}
+
+check_columns <- function (x, required, label)
+{
+    absent <- setdiff(required, names(x))
+    if (length(absent))
+        stop(label, " lacks columns: ", paste(absent, collapse = ", "))
+}
+
+check_ids <- function (x, label)
+{
+    if (anyNA(x) || any(!nzchar(trimws(x))) || anyDuplicated(x))
+        stop(label, " must be nonempty, nonmissing, unique IDs.")
+}
+
+file_hash <- function (x)
+{
+    need("digest")
+    if (!file.exists(x))
+        stop("Cannot hash missing input: ", x)
+    digest::digest(file = x, algo = "sha256")
+}
+
+hash_manifest <- function (paths, out, relative_to = NULL)
+{
+    paths <- unique(paths)
+    if (anyNA(paths) || any(!nzchar(paths)))
+        stop("Invalid path in required input manifest.")
+    missing <- paths[!file.exists(paths) | dir.exists(paths)]
+    if (length(missing))
+        stop("Required files missing or not regular files: ", paste(missing, collapse = ", "))
+    labels <- normalizePath(paths, mustWork = TRUE)
+    if (!is.null(relative_to))
+        labels <- substring(labels, nchar(normalizePath(relative_to)) + 2L)
+    write_tsv(data.frame(file = labels, bytes = file.info(paths)$size, sha256 = vapply(paths, file_hash, character(1))), out)
+}
+
+stage_dir <- function (config, stage)
+file.path(path_at(config$.root, config$output_dir), stage)
+
+init_stage <- function (config, stage, inputs = character())
+{
+    out <- stage_dir(config, stage)
+    if (dir.exists(out) && !file.exists(file.path(out, "SUCCESS")) && isTRUE(restart_failed_stage)) {
+        archived <- paste0(out, "_failed_", format(Sys.time(), "%Y%m%d_%H%M%S"))
+        if (file.exists(archived) || !file.rename(out, archived))
+            stop("Could not archive failed stage.")
+    }
+    if (dir.exists(out) || file.exists(out))
+        stop("Stage directory already exists: ", out, ". Choose a new output_dir; failed-run files must not mix with a new run.")
+    missing <- inputs[!file.exists(inputs) | dir.exists(inputs)]
+    if (anyNA(inputs) || length(missing))
+        stop("Required stage inputs missing: ", paste(missing, collapse = ", "))
+    dir.create(dirname(out), recursive = TRUE, showWarnings = FALSE)
+    if (!dir.create(out, showWarnings = FALSE))
+        stop("Could not claim new stage directory: ", out)
+    writeLines(capture.output(sessionInfo()), file.path(out, "sessionInfo_start.txt"))
+    dput(config, file.path(out, "run_config.R"))
+    hash_manifest(inputs, file.path(out, "input_sha256.tsv"))
+    code <- c(list.files(config$.root, full.names = TRUE, pattern = "\\.(R|txt)$"),
+                  list.files(file.path(config$.root, "gene_sets"), full.names = TRUE))
+    code <- code[!dir.exists(code)]
+    hash_manifest(code, file.path(out, "code_sha256.tsv"), relative_to = config$.root)
+    set.seed(config$seed)
+    out
+}
+
+finish_stage <- function (out)
+{
+    writeLines(capture.output(sessionInfo()), file.path(out, "sessionInfo.txt"))
+    loaded <- sort(loadedNamespaces())
+    write_tsv(data.frame(package = loaded, version = vapply(loaded, function(p) as.character(getNamespaceVersion(p)), character(1)), path = vapply(loaded,
+        function(p) if (p == "base")
+            file.path(R.home(), "library/base")
+        else getNamespaceInfo(asNamespace(p), "path"), character(1))), file.path(out, "loaded_packages.tsv"))
+    files <- list.files(out, full.names = TRUE, recursive = TRUE)
+    files <- files[!basename(files) %in% c("SUCCESS", "output_sha256.tsv")]
+    hash_manifest(files, file.path(out, "output_sha256.tsv"), relative_to = out)
+    writeLines(format(Sys.time(), tz = "UTC", usetz = TRUE), file.path(out, "SUCCESS"))
+}
+
+
+cell_tests <- function (d, adjust = "bonferroni")
+{
+    need("rstatix")
+    if (length(unique(d$value)) < 2L)
+        return(list(omnibus = data.frame(p = NA_real_, status = "constant values; test undefined"), pairs = data.frame()))
+    if (length(unique(d$condition)) < 2L)
+        return(list(omnibus = data.frame(p = NA_real_, status = "fewer than two groups"), pairs = data.frame()))
+    list(omnibus = as.data.frame(rstatix::kruskal_test(d, value ~ condition)), pairs = as.data.frame(rstatix::dunn_test(d, value ~ condition,
+        p.adjust.method = adjust)))
+}
+
+# Explicit metadata and feature handling; no network annotation lookup.
+disease_levels <- c("Healthy_Reference", "AKI", "CKD")
+lineage_levels <- c("epithelial cell", "stromal cell", "neural cell", "immune cell")
+disease_colors <- c(Healthy_Reference = "#C9C9C9", AKI = "#FBA425", CKD = "#E66342")
+marker_ids <- c(CD163 = "ENSG00000177575", MRC1 = "ENSG00000260314",
+                SPP1 = "ENSG00000118785", FN1 = "ENSG00000115414",
+                STAT3 = "ENSG00000168610", ITGAX = "ENSG00000140678",
+                CD44 = "ENSG00000026508", THBS1 = "ENSG00000137801")
+
+map_condition <- function(x) {
+    key <- c("Normal Reference" = "Healthy_Reference",
+             "Acute Kidney Injury (AKI)" = "AKI",
+             "Chronic Kidney Disease" = "CKD",
+             "Hypertensive CKD (H-CKD)" = "CKD",
+             "COVID-AKI" = NA_character_,
+             "Diabetic Kidney Disease (DKD)" = NA_character_)
+    if (anyNA(x) || any(!x %in% names(key)))
+        stop("Unrecognized/missing condition.long values: ",
+             paste(unique(x[is.na(x) | !x %in% names(key)]), collapse = ", "),
+             ". Check the input release; do not silently drop new conditions.")
+    factor(unname(key[as.character(x)]), levels = disease_levels)
+}
+
+map_lineage <- function(x, mapping) {
+    check_columns(mapping, c("cell_type", "lineage"), "lineage_map.tsv")
+    check_ids(mapping$cell_type, "Mapped cell types")
+    if (anyNA(mapping$lineage) || any(!mapping$lineage %in% lineage_levels))
+        stop("Invalid broad lineage in lineage_map.tsv.")
+    idx <- match(x, mapping$cell_type)
+    if (anyNA(idx)) stop("Unmapped cell_type labels: ", paste(unique(x[is.na(idx)]), collapse = ", "))
+    factor(mapping$lineage[idx], levels = lineage_levels)
+}
+
+resolve_features <- function(features, requested, aliases = NULL) {
+    check_ids(features, "RNA feature IDs")
+    # Ensembl version suffixes may vary; symbols are accepted only when unambiguous.
+    clean <- sub("\\.[0-9]+$", "", features)
+    vapply(seq_along(requested), function(i) {
+        candidates <- requested[i]
+        if (!is.null(aliases)) candidates <- c(candidates, aliases[i])
+        hit <- which(features %in% candidates | clean %in% candidates)
+        if (length(hit) != 1L)
+            stop("Feature ", requested[i], " matched ", length(hit), " RNA rows. Check annotation; no duplicate collapse was performed.")
+        features[hit]
+    }, character(1), USE.NAMES = FALSE)
+}
+
+check_seurat_version <- function(config) {
+    actual <- as.character(utils::packageVersion("Seurat"))
+    if (actual != config$expected_seurat_version && !isTRUE(config$allow_version_mismatch))
+        stop("Seurat ", config$expected_seurat_version, " is the manuscript version; installed: ", actual,
+             ". Use the matching environment or explicitly set allow_version_mismatch = TRUE and review differences.")
+    if (getRversion() != "4.4.2") warning("Manuscript R version: 4.4.2; running ", getRversion(), ". Runtime versions will be recorded.")
+    future::plan(future::sequential)
+    options(mc.cores = 1L)
+}
+
+prepare_rna <- function(object) {
+    if (!inherits(object, "Seurat") || !"RNA" %in% names(object@assays))
+        stop("Expected a processed Seurat object with an RNA assay.")
+    SeuratObject::DefaultAssay(object) <- "RNA"
+    layers <- SeuratObject::Layers(object[["RNA"]], search = NA)
+    dat <- grep("^data($|\\.)", layers, value = TRUE)
+    if (!length(dat)) stop("No normalized RNA data layer. Supply the processed atlas; this workflow does not infer a normalization recipe.")
+    if (length(dat) > 1L || dat != "data") {
+        if ("data" %in% dat && length(dat) > 1L)
+            stop("Both joined and split RNA data layers are present. Resolve ambiguous input layers first.")
+        object <- SeuratObject::JoinLayers(object, assay = "RNA", layers = "data", new = "data")
+    }
+    mat <- SeuratObject::LayerData(object, assay = "RNA", layer = "data")
+    if (!identical(colnames(mat), colnames(object)))
+        stop("RNA data columns do not match the full object cell order.")
+    check_ids(colnames(object), "Cell IDs")
+    check_ids(rownames(mat), "RNA feature IDs")
+    rr <- range(mat)
+    if (any(!is.finite(rr)) || rr[1] < 0)
+        stop("RNA data contain negative/nonfinite values; expected nonnegative log-normalized expression.")
+    object
+}
+
+validate_umap <- function(object, reduction = "umap") {
+    if (!reduction %in% names(object@reductions)) stop("Missing reduction: ", reduction)
+    emb <- SeuratObject::Embeddings(object, reduction = reduction)
+    if (ncol(emb) < 2 || !identical(rownames(emb), colnames(object)) || any(!is.finite(emb[, 1:2])))
+        stop("Invalid UMAP coordinates or cell order.")
+    invisible(TRUE)
+}
+
+count_cells <- function(metadata, fields) {
+    check_columns(metadata, fields, "metadata")
+    z <- as.data.frame(table(metadata[, fields, drop = FALSE]), stringsAsFactors = FALSE)
+    names(z)[ncol(z)] <- "n_cells"
+    z
+}
+
+donor_manifest <- function(metadata, donor_column = NULL) {
+    if (is.null(donor_column)) return(NULL)
+    check_columns(metadata, c(donor_column, "disease_group"), "metadata")
+    ids <- as.character(metadata[[donor_column]])
+    if (anyNA(ids) || any(!nzchar(trimws(ids)))) stop("Missing donor IDs; do not replace them with cell IDs.")
+    disease <- as.character(metadata$disease_group)
+    if (any(vapply(split(disease, ids), function(z) length(unique(z)), integer(1)) != 1L))
+        stop("Donor IDs span disease groups. Verify IDs and cohort metadata before donor counting.")
+    ans <- aggregate(rep(1L, length(ids)), list(donor_id = ids, disease_group = disease), sum)
+    names(ans)[3] <- "n_cells"
+    ans
+}
+
+export_metadata <- function(object, out, donor_column = NULL) {
+    md <- object[[]]
+    write_tsv(data.frame(column = names(md), n_unique = vapply(md, function(z) length(unique(z)), integer(1))),
+              file.path(out, "metadata_columns.tsv"))
+    write_tsv(count_cells(md, "disease_group"), file.path(out, "cells_by_disease.tsv"))
+    write_tsv(count_cells(md, c("subclass.full", "disease_group")), file.path(out, "cells_by_subclass_and_disease.tsv"))
+    dm <- donor_manifest(md, donor_column)
+    if (is.null(dm)) {
+        writeLines(c("Donor ID column was not specified. No donor counts or donor-level inference were generated.",
+                     "Review metadata_columns.tsv and set donor_id_column to a verified participant ID column."),
+                   file.path(out, "DONOR_ID_NOT_CONFIGURED.txt"))
+    } else {
+        write_tsv(dm, file.path(out, "donor_cell_counts.tsv"))
+        write_tsv(data.frame(disease_group = disease_levels,
+                            n_donors = vapply(disease_levels, function(g) sum(dm$disease_group == g), integer(1))),
+                  file.path(out, "donors_by_disease.tsv"))
+    }
+}
+
+input_checkpoint <- function(config) {
+    p <- path_at(config$.root, config$atlas_rds)
+    directory <- dirname(p)
+    if (!file.exists(file.path(directory, "SUCCESS"))) stop("Run script 01 successfully before scripts 02-04.")
+    m <- read_tsv(file.path(directory, "output_sha256.tsv"))
+    i <- match(basename(p), m$file)
+    if (is.na(i) || file_hash(p) != m$sha256[i]) stop("Atlas checkpoint checksum mismatch.")
+    p
+}
+
+run_markers <- function(object, group_column, logfc, seed, out, stem) {
+    ids <- droplevels(factor(object[[]][[group_column]]))
+    if (anyNA(ids) || nlevels(ids) < 2L || any(table(ids) < 3L))
+        stop("Marker groups must contain at least 3 cells and at least two nonmissing groups: ", group_column)
+    SeuratObject::Idents(object) <- ids
+    groups <- levels(ids)
+    counts <- as.integer(table(ids))
+    write_tsv(data.frame(group = groups, n_in_group = counts, n_in_rest = length(ids) - counts,
+                        comparator = "All remaining cells in this analysis object"),
+              file.path(out, paste0(stem, "_comparisons.tsv")))
+    warnings <- character()
+    markers <- withCallingHandlers(
+        Seurat::FindAllMarkers(object, assay = "RNA", slot = "data", test.use = "wilcox",
+                              min.pct = 0.25, logfc.threshold = logfc, only.pos = TRUE,
+                              return.thresh = 0.01, max.cells.per.ident = Inf,
+                              random.seed = seed, base = 2, densify = FALSE, verbose = TRUE),
+        warning = function(w) { warnings <<- c(warnings, conditionMessage(w)) })
+    writeLines(if (length(warnings)) unique(warnings) else "No warnings.", file.path(out, paste0(stem, "_warnings.txt")))
+    # Seurat may warn rather than stop when a DE comparison fails. Do not mark such a stage successful.
+    if (any(grepl("not performed|failed|not joined|error", warnings, ignore.case = TRUE)))
+        stop("Marker analysis reported a failed/skipped test; see the warning log.")
+    if (!nrow(markers)) stop("No markers were returned; review warnings/input instead of plotting an empty result.")
+    check_columns(markers, c("gene", "cluster", "avg_log2FC", "p_val", "p_val_adj"), "FindAllMarkers output")
+    markers$cluster <- as.character(markers$cluster)
+    write_tsv(markers, file.path(out, paste0(stem, "_all_returned.tsv")))
+    markers
+}
+
+top_markers <- function(markers, groups, n = 10L) {
+    check_columns(markers, c("gene", "cluster", "avg_log2FC"), "markers")
+    z <- markers[is.finite(markers$avg_log2FC) & markers$avg_log2FC > 0, , drop = FALSE]
+    parts <- lapply(groups, function(g) {
+        d <- z[as.character(z$cluster) == g, , drop = FALSE]
+        d <- d[order(-d$avg_log2FC, d$gene, method = "radix"), , drop = FALSE]
+        d <- d[!duplicated(d$gene), , drop = FALSE]
+        if (nrow(d) < n) stop("Fewer than ", n, " positive markers for ", g, "; review the release/results.")
+        d <- head(d, n); d$rank_within_group <- seq_len(n); d
+    })
+    do.call(rbind, parts)
+}
+
+mean_linear_expression <- function(logdata, features, labels, groups) {
+    if (ncol(logdata) != length(labels) || anyNA(labels)) stop("Misaligned expression/group labels.")
+    z <- logdata[features, , drop = FALSE]
+    result <- vapply(groups, function(g) {
+        keep <- which(labels == g)
+        if (!length(keep)) stop("No cells for group ", g)
+        # Equivalent to AverageExpression(layer = 'data'): mean in non-log space.
+        as.numeric(Matrix::rowMeans(expm1(z[, keep, drop = FALSE])))
+    }, numeric(length(features)))
+    dimnames(result) <- list(features, groups)
+    result
+}
+
+save_plot <- function(plot, path, width, height) {
+    ggplot2::ggsave(path, plot = plot, width = width, height = height, units = "in", limitsize = FALSE,
+                   device = grDevices::pdf, useDingbats = FALSE)
+}
+
+marker_heatmap <- function(object, selected, group_column, groups, out, stem) {
+    # Repeated genes selected by different groups occupy repeated rows, preserving selection provenance.
+    features <- unique(selected$gene)
+    mat <- SeuratObject::LayerData(object, assay = "RNA", layer = "data")
+    avg <- mean_linear_expression(mat, features, as.character(object[[]][[group_column]]), groups)
+    write_tsv(data.frame(feature_id = rownames(avg), avg, check.names = FALSE), file.path(out, paste0(stem, "_mean_linear_expression.tsv")))
+    z <- t(scale(t(avg)))
+    constant <- rownames(z)[apply(z, 1, function(r) any(!is.finite(r)))]
+    write_tsv(data.frame(feature_id = constant), file.path(out, paste0(stem, "_constant_features.tsv")))
+    # A constant row has no relative enrichment; display as zero, report it explicitly.
+    if (length(constant)) z[constant, ] <- 0
+    selected$row_id <- seq_len(nrow(selected))
+    z <- z[selected$gene, , drop = FALSE]
+    df <- data.frame(row_id = rep(selected$row_id, times = length(groups)),
+                     group = factor(rep(groups, each = nrow(selected)), levels = groups),
+                     row_z = as.vector(z))
+    df$row_id <- factor(df$row_id, levels = rev(selected$row_id))
+    row_labels <- setNames(selected$gene, selected$row_id)
+    p <- ggplot2::ggplot(df, ggplot2::aes(group, row_id, fill = row_z)) + ggplot2::geom_tile() +
+        ggplot2::scale_y_discrete(labels = row_labels) +
+        ggplot2::scale_fill_gradient2(low = "#2C7BB6", mid = "white", high = "#D7191C", midpoint = 0) +
+        ggplot2::labs(x = NULL, y = NULL, fill = "Row z-score") + ggplot2::theme_minimal(base_size = 9) +
+        ggplot2::theme(axis.text.x = ggplot2::element_text(angle = 45, hjust = 1), panel.grid = ggplot2::element_blank())
+    save_plot(p, file.path(out, paste0(stem, ".pdf")), max(7, length(groups) * 0.7), max(6, nrow(selected) * 0.13))
+    write_tsv(selected, file.path(out, paste0(stem, "_selected_markers.tsv")))
+    write_tsv(df, file.path(out, paste0(stem, "_row_z_scores.tsv")))
+}
+
+compare_source_features <- function(selected, reference, out, stem) {
+    ref <- reference
+    check_columns(ref, c("order", "feature_id"), "Original fixed feature list")
+    ref <- ref[order(ref$order), ]
+    a <- sub("\\.[0-9]+$", "", selected$gene)
+    b <- ref$feature_id
+    n <- max(length(a), length(b))
+    length(a) <- length(b) <- n
+    d <- data.frame(position = seq_len(n), recomputed_feature = a, source_fixed_feature = b,
+                    same_at_position = !is.na(a) & !is.na(b) & a == b)
+    write_tsv(d, file.path(out, paste0(stem, "_source_list_comparison.tsv")))
+    if (!all(d$same_at_position)) warning(stem, ": recomputed top markers differ from the original fixed list. Differences are listed in the exported reference-comparison table.")
+}
+
+subset_recluster <- function(atlas, config, out) {
+    md <- atlas[[]]
+    keep <- rownames(md)[as.character(md$subclass.full) %in% config$subclasses]
+    if (length(keep) <= config$npcs + 1L) stop("Too few cells for the requested subset/PCA.")
+    object <- subset(atlas, cells = keep)
+    object <- prepare_rna(object)
+    features <- SeuratObject::VariableFeatures(object[["RNA"]])
+    features <- features[features %in% rownames(object[["RNA"]])]
+    if (length(features) <= config$npcs) stop("Insufficient inherited RNA variable features. Supply the original processed atlas with its variable-feature annotation.")
+    write_tsv(data.frame(feature_id = features), file.path(out, "inherited_RNA_variable_features.tsv"))
+    object <- Seurat::ScaleData(object, assay = "RNA", features = features, verbose = FALSE)
+    object <- Seurat::RunPCA(object, assay = "RNA", features = features, npcs = config$npcs,
+                             seed.use = config$seed, verbose = FALSE)
+    if (ncol(SeuratObject::Embeddings(object, "pca")) < config$npcs) stop("PCA returned fewer dimensions than requested.")
+    object <- Seurat::RunUMAP(object, reduction = "pca", dims = seq_len(config$npcs),
+                              umap.method = "uwot", metric = "cosine", n.neighbors = 30L,
+                              n.components = 2L, min.dist = 0.3, spread = 1,
+                              seed.use = config$seed, verbose = FALSE)
+    object <- Seurat::FindNeighbors(object, reduction = "pca", dims = seq_len(config$npcs),
+                                    k.param = 20L, nn.method = "annoy", n.trees = 50L,
+                                    prune.SNN = 1/15, verbose = FALSE)
+    object <- Seurat::FindClusters(object, graph.name = "RNA_snn", resolution = config$resolution,
+                                   algorithm = 1L, random.seed = config$cluster_seed, verbose = FALSE)
+    object$analysis_cluster <- as.character(SeuratObject::Idents(object))
+    validate_umap(object)
+    write_tsv(count_cells(object[[]], c("analysis_cluster", "disease_group")), file.path(out, "cluster_cell_counts.tsv"))
+    object
+}
+
+spp1_cluster_state <- function(markers, clusters, spp1_feature, alpha = 0.05) {
+    check_columns(markers, c("gene", "cluster", "p_val_adj", "avg_log2FC"), "subset markers")
+    high <- unique(as.character(markers$cluster[markers$gene == spp1_feature &
+                          !is.na(markers$p_val_adj) & markers$p_val_adj < alpha & markers$avg_log2FC > 0]))
+    data.frame(cluster = clusters, SPP1_state = ifelse(clusters %in% high, "SPP1-high", "Other clusters"))
+}
+
+umap_plot <- function(object, column, split = NULL, title = NULL) {
+    p <- Seurat::DimPlot(object, reduction = "umap", group.by = column, split.by = split,
+                        pt.size = 0.1, label = FALSE, raster = FALSE)
+    if (!is.null(title)) p <- p + ggplot2::ggtitle(title)
+    p
+}
+
+expression_panels <- function(object, out, stem, donor_column, dunn_adjust) {
+    fid <- resolve_features(rownames(object[["RNA"]]), marker_ids["SPP1"], "SPP1")
+    write_tsv(data.frame(symbol = "SPP1", requested_id = unname(marker_ids["SPP1"]), actual_id = fid),
+              file.path(out, "SPP1_feature_mapping.tsv"))
+    mat <- SeuratObject::LayerData(object, assay = "RNA", layer = "data")
+    md <- object[[]]
+    d <- data.frame(cell_id = colnames(object), condition = md$disease_group, value = as.numeric(mat[fid, ]))
+    d$condition <- factor(d$condition, levels = disease_levels)
+    tests <- cell_tests(d, adjust = dunn_adjust)
+    write_tsv(tests$omnibus, file.path(out, paste0(stem, "_cell_level_Kruskal_Wallis.tsv")))
+    write_tsv(tests$pairs, file.path(out, paste0(stem, "_cell_level_Dunn.tsv")))
+    if (!is.null(donor_column)) {
+        donor_manifest(md, donor_column) # validate mapping before creating summaries
+        d$donor_id <- as.character(md[[donor_column]])
+        med <- aggregate(d$value, list(donor_id = d$donor_id, condition = d$condition), median)
+        names(med)[3] <- "median_log_expression"
+        write_tsv(med, file.path(out, paste0(stem, "_donor_medians_descriptive.tsv")))
+    }
+    write_tsv(d, file.path(out, paste0(stem, "_cell_expression.tsv")))
+    writeLines(c("Kruskal-Wallis and Dunn tests use cells, not independent donors.",
+                 paste0("Dunn adjustment within the three disease comparisons: ", dunn_adjust, "."),
+                 "No donor-level hypothesis test is performed by this script."), file.path(out, "STATISTICAL_UNIT.txt"))
+    p <- ggplot2::ggplot(d, ggplot2::aes(condition, value, fill = condition)) +
+        ggplot2::geom_violin(scale = "width", trim = TRUE) +
+        ggplot2::scale_fill_manual(values = disease_colors, drop = FALSE) +
+        ggplot2::labs(x = NULL, y = "SPP1 log-normalized expression") + ggplot2::theme_classic() +
+        ggplot2::theme(legend.position = "none", axis.text.x = ggplot2::element_text(angle = 25, hjust = 1))
+    save_plot(p, file.path(out, paste0(stem, "_violin.pdf")), 5, 4)
+    # Global limits shared across disease panels, not three separately rescaled gradients.
+    upper <- max(d$value)
+    if (upper <= 0) upper <- 1
+    p <- Seurat::FeaturePlot(object, features = fid, reduction = "umap", split.by = "disease_group",
+                             order = TRUE, keep.scale = "feature", min.cutoff = 0, max.cutoff = upper,
+                             cols = c("grey90", "#542788"), pt.size = 0.15, raster = FALSE)
+    save_plot(p, file.path(out, paste0(stem, "_SPP1_by_disease.pdf")), 12, 4)
+    invisible(fid)
+}
+
+
+# 3. Analysis -----------------------------------------------------------------
+config$.root <- locate_project()
+need(c("Seurat", "SeuratObject", "Matrix", "ggplot2", "patchwork", "digest", "rstatix", "future"))
+check_seurat_version(config)
+input <- input_checkpoint(config)
+out <- init_stage(config, "02_PT_S3", input)
+atlas <- readRDS(input)
+check_columns(atlas[[]], c("disease_group", "subclass.full"), "Atlas checkpoint")
+atlas$focus_population <- factor(ifelse(as.character(atlas$subclass.full) %in% config$subclasses,
+                                        "PT-S3", "Other cells"), levels = c("Other cells", "PT-S3"))
+save_plot(umap_plot(atlas, "focus_population"), file.path(out, "Figure4J_atlas_location.pdf"), 7, 5)
+
+object <- subset_recluster(atlas, config, out)
+rm(atlas)
+export_metadata(object, out, config$donor_id_column)
+mk <- run_markers(object, "analysis_cluster", logfc = 1, seed = config$seed, out, "subset_cluster_markers")
+fid <- resolve_features(rownames(object[["RNA"]]), marker_ids["SPP1"], "SPP1")
+cluster_names <- levels(droplevels(factor(object$analysis_cluster)))
+states <- spp1_cluster_state(mk, cluster_names, fid, alpha = 0.05)
+write_tsv(states, file.path(out, "SPP1_cluster_state_definition.tsv"))
+write_tsv(mk[mk$gene == fid, , drop = FALSE], file.path(out, "SPP1_cluster_marker_evidence.tsv"))
+object$SPP1_cluster_state <- states$SPP1_state[match(object$analysis_cluster, states$cluster)]
+if (!any(states$SPP1_state == "SPP1-high")) warning("No cluster met the SPP1-high marker definition; no cluster was forced to be SPP1-high.")
+save_plot(umap_plot(object, "analysis_cluster"), file.path(out, "Figure4J_subset_clusters.pdf"), 7, 5)
+save_plot(umap_plot(object, "SPP1_cluster_state"), file.path(out, "Figure4J_SPP1_cluster_state.pdf"), 7, 5)
+expression_panels(object, out, "Figure4K", config$donor_id_column, config$dunn_adjust)
+write_tsv(count_cells(object[[]], c("SPP1_cluster_state", "disease_group")), file.path(out, "SPP1_cluster_state_cell_counts.tsv"))
+saveRDS(object, file.path(out, "PT_S3_analyzed.rds"))
+finish_stage(out)
+message("Completed PT-S3 analysis: ", out)

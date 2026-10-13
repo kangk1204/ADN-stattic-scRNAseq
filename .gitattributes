@@ -1,0 +1,6 @@
+*.R text eol=lf
+README.md text eol=lf
+
+# Preserve the supplied gene-list bytes for checksum verification.
+scRNA-seq/gene_sets/* -text
+GSVA/gene_sets/* -text
