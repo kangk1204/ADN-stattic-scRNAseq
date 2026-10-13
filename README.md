@@ -22,7 +22,7 @@ revised manuscript.
 | `scRNA-seq` | `01_QC_and_Integration.R` | SoupX, doublet detection, QC and Harmony integration; S3A |
 | | `02_Figure3_FigureS3.R` | Atlas annotation, module scores and cell representation; 3A–F, S3B–D |
 | | `03_Figure4_FigureS7.R` | PST transcriptional analysis; 4A–B, S7A; gene lists for S7B |
-| | `04_FigureS8.R` | GEC subtypes, expression and cell representation; S8A–D; gene lists for S8E |
+| | `04_FigureS8.R` | GEC subtypes, expression and cell representation; S8A–B, S8D; DEG source table for S8C; gene lists for S8E |
 | | `05_Myeloid_Macro_Figure5_S10_S13.R` | Myeloid/macrophage subsets and expression programs; 5A–D, S10A–B, S13B |
 | | `06_CellChat_Figure5E_S9_S10.R` | Renal-cell-to-myeloid communication; 5E, S9A–C, S10C–D |
 | | `07_Fibroblast_subset_FigureS11ABC.R` | Fibroblast subsets, markers and cell representation; S11A–C |
@@ -41,6 +41,7 @@ The mouse folder also contains `gene_sets.tsv`, `gene_set_manifest.tsv` and
 `SHA256SUMS.tsv`; these define membership, aliases and checksums used by the
 scripts. Keep them together. External pathway-enrichment results are needed for
 panels whose enrichment calculation is outside the supplied code.
+Figure S8C uses the exported DEG table; its volcano plot was assembled externally.
 
 ## Software requirements
 
@@ -144,10 +145,11 @@ image orientation and data release. Image containers encompass multiple specimen
 
 ## Configuration and execution
 
-Edit the Configuration block, or set these environment variables to absolute
-paths. Relative paths resolve from the folder containing the script. Annotation
-maps and crop coordinates are embedded; no separate configuration download is
-required.
+Edit the Configuration block, or set these environment variables. Use absolute
+paths for custom inputs and outputs. Default paths are based on the folder
+containing the script; some custom input paths are read directly and depend on
+R's working directory when relative. Annotation maps and crop coordinates are
+embedded; no separate configuration download is required.
 
 | Variable | Input / setting |
 |---|---|
